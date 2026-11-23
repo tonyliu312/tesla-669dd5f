@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FSD 车机 / mitmproxy 看板</title>
+<style>
+  :root{
+    --bg:#0b0f14; --panel:#121a23; --panel2:#0f161e; --line:#1f2c39; --text:#dbe6f0;
+    --muted:#7f93a6; --green:#2ecc71; --red:#ff5d5d; --amber:#ffb648; --blue:#4da3ff; --purple:#a78bfa;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:radial-gradient(1200px 600px at 20% -10%,#16222f 0%,var(--bg) 60%);color:var(--text);
+       font:14px/1.5 "Segoe UI","Microsoft YaHei",system-ui,sans-serif}
+  a{color:var(--blue)}
+  header{display:flex;align-items:center;gap:16px;padding:16px 22px;border-bottom:1px solid var(--line);
+         position:sticky;top:0;background:rgba(11,15,20,.88);backdrop-filter:blur(8px);z-index:10;flex-wrap:wrap}
+  header h1{font-size:16px;margin:0;letter-spacing:.5px;font-weight:600}
+  .pills{display:flex;gap:8px;flex-wrap:wrap;margin-left:auto}
+  .pill{display:inline-flex;align-items:center;gap:6px;padding:5px 10px;border-radius:999px;border:1px solid var(--line);
+        background:var(--panel2);font-size:12px;color:var(--muted)}
+  .dot{width:8px;height:8px;border-radius:50%;background:var(--muted)}
+  .dot.on{background:var(--green);box-shadow:0 0 8px var(--green)}
+  .dot.off{background:var(--red)}
+  .dot.warn{background:var(--amber)}
+  main{padding:18px 22px 40px;max-width:1500px;margin:0 auto}
+  .grid{display:grid;gap:14px}
+  .cards{grid-template-columns:repeat(4,minmax(0,1fr))}
+  .two{grid-template-columns:minmax(0,1.35fr) minmax(0,1fr);margin-top:14px}
+  .panel{background:linear-gradient(180deg,var(--panel) 0%,var(--panel2) 100%);border:1px solid var(--line);
+         border-radius:12px;padding:14px 16px;min-width:0}
+  .panel h2{font-size:12px;text-transform:uppercase;letter-spacing:1.2px;color:var(--muted);margin:0 0 10px;font-weight:600}
+  .big{font-size:26px;font-weight:700;letter-spacing:.5px}
+  .sub{color:var(--muted);font-size:12px;margin-top:2px;word-break:break-all}
+  .row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  button{font:inherit;font-size:12px;padding:6px 11px;border-radius:8px;border:1px solid var(--line);
+         background:#16212c;color:var(--text);cursor:pointer;transition:.15s}
+  button:hover{border-color:#2f4557;background:#1b2935}
+  button.primary{background:#17324a;border-color:#255177;color:#cfe6ff}
+  button.danger{background:#3a1b1f;border-color:#5e2a30;color:#ffd7d7}
+  button.ghost{background:transparent}
+  button:disabled{opacity:.45;cursor:not-allowed}
+  table{width:100%;border-collapse:collapse;font-size:12.5px;table-layout:fixed}
+  th,td{text-align:left;padding:7px 8px;border-bottom:1px solid rgba(31,44,57,.65);overflow:hidden;
+        text-overflow:ellipsis;white-space:nowrap}
+  th{color:var(--muted);font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.6px}
+  tbody tr:hover{background:rgba(77,163,255,.06)}
+  .tag{display:inline-block;padding:2px 7px;border-radius:6px;font-size:11px;border:1px solid var(--line)}
+  .tag.hit{background:rgba(46,204,113,.12);border-color:rgba(46,204,113,.35);color:#8ef0b6}
+  .tag.flow{background:rgba(77,163,255,.12);border-color:rgba(77,163,255,.35);color:#a9d4ff}
+  .tag.near{background:rgba(255,182,72,.12);border-color:rgba(255,182,72,.35);color:#ffd79a}
+  pre{margin:0;background:#0a1218;border:1px solid var(--line);border-radius:10px;padding:12px;
+      overflow:auto;max-height:260px;font:12px/1.55 "Cascadia Code",Consolas,monospace;color:#bfe3ff}
+  textarea{width:100%;min-height:190px;background:#0a1218;border:1px solid var(--line);border-radius:10px;
+           color:#bfe3ff;padding:10px;font:12px/1.55 "Cascadia Code",Consolas,monospace;resize:vertical}
+  .kv{display:grid;grid-template-columns:104px 1fr;gap:4px 10px;font-size:12.5px}
+  .kv div:nth-child(odd){color:var(--muted)}
+  .empty{color:var(--muted);font-size:12.5px;padding:14px 4px}
+  .toast{position:fixed;right:18px;bottom:18px;display:flex;flex-direction:column;gap:8px;z-index:50}
+  .toast div{padding:10px 14px;border-radius:10px;border:1px solid var(--line);background:#16212c;
+             box-shadow:0 8px 24px rgba(0,0,0,.45);font-size:12.5px;max-width:420px}
+  .toast div.ok{border-color:rgba(46,204,113,.5)}
+  .toast div.err{border-color:rgba(255,93,93,.55)}
+  .hint{color:var(--muted);font-size:12px;margin-top:10px;line-height:1.6}
+  code{background:#0a1218;border:1px solid var(--line);border-radius:5px;padding:1px 5px;font-size:11.5px}
+  @media (max-width:1100px){.cards{grid-template-columns:repeat(2,minmax(0,1fr))}.two{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<header>
+  <h1>FSD 车机 / mitmproxy 看板</h1>
+  <div class="pills">
+    <span class="pill"><span id="p-rev" class="dot off"></span>reverse 4567</span>
+    <span class="pill"><span id="p-pxy" class="dot off"></span>proxy 8080</span>
+    <span class="pill"><span id="p-hs" class="dot off"></span>热点</span>
+    <span class="pill"><span id="p-car" class="dot off"></span>车机</span>
+    <span class="pill" id="clock">--:--:--</span>
+  </div>
+</header>
+
+<main>
+  <section class="grid cards">
+    <div class="panel">
+      <h2>命中次数</h2>
+      <div class="big" id="kpi-hits">0</div>
+      <div class="sub" id="kpi-hits-sub">最近命中 --</div>
+      <div class="row" style="margin-top:10px">
+        <button class="primary" onclick="act('/api/selftest','POST').then(r=>r.ok&&toast('自测通过：'+r.via+' '+r.bytes+'B','ok'))">测试一次</button>
+        <button class="ghost" onclick="act('/api/logs/clear','POST')">清空日志</button>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>mitmproxy</h2>
+      <div class="row" style="justify-content:space-between">
+        <div><div class="big" id="kpi-flow">0</div><div class="sub">累计流量记录（FLOW）</div></div>
+      </div>
+      <div class="row" style="margin-top:10px">
+        <button id="btn-rev" class="primary" onclick="toggle('reverse')">启动 reverse</button>
+        <button id="btn-pxy" class="primary" onclick="toggle('proxy')">启动 proxy</button>
+      </div>
+      <div class="sub" id="upstream" style="margin-top:8px"></div>
+    </div>
+
+    <div class="panel">
+      <h2>车机连接</h2>
+      <div class="big" id="car-ip">未发现</div>
+      <div class="sub" id="car-meta">等车机把流量发过来</div>
+      <div class="kv" style="margin-top:10px">
+        <div>MAC</div><div id="car-mac">-</div>
+        <div>命中/流量</div><div id="car-count">0 / 0</div>
+        <div>最后活动</div><div id="car-last">-</div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>热点（移动热点）</h2>
+      <div class="big" id="hs-state">unknown</div>
+      <div class="sub" id="hs-ssid">-</div>
+      <div class="row" style="margin-top:10px">
+        <button class="primary" onclick="act('/api/hotspot/start','POST',true)">开热点</button>
+        <button class="danger" onclick="act('/api/hotspot/stop','POST',true)">关热点</button>
+      </div>
+      <div class="sub" id="hs-clients" style="margin-top:8px">客户端 -</div>
+    </div>
+  </section>
+
+  <section class="grid two">
+    <div class="panel">
+      <h2>最近命中 /feature_configuration</h2>
+      <table>
+        <colgroup><col style="width:74px"><col style="width:52px"><col><col style="width:74px"><col style="width:150px"></colgroup>
+        <thead><tr><th>时间</th><th>方法</th><th>URL</th><th>字节</th><th>客户端</th></tr></thead>
+        <tbody id="hits-body"><tr><td colspan="5" class="empty">还没有命中。车机重启后 5–10 分钟内应出现第一次。</td></tr></tbody>
+      </table>
+      <div class="hint" id="hits-hint"></div>
+    </div>
+
+    <div class="panel">
+      <h2>mitmproxy 回传内容</h2>
+      <div class="kv">
+        <div>字节数</div><div><span id="resp-bytes">-</span> <span class="sub" id="resp-src"></span></div>
+        <div>X-Checksum</div><div id="resp-md5">-</div>
+        <div>Content-Type</div><div>application/json</div>
+      </div>
+      <pre id="resp-body" style="margin-top:10px">-</pre>
+      <h2 style="margin-top:14px">车机最近一条原始请求（先看到，再回包）</h2>
+      <div class="kv">
+        <div>方法 / VIN</div><div><span id="lq-method">-</span> <span id="lq-vin" class="sub"></span></div>
+        <div>请求体</div><div><span id="lq-bytes">-</span> <span id="lq-md5" class="sub"></span></div>
+        <div>落盘文件</div><div id="lq-file" class="sub">-</div>
+      </div>
+      <pre id="lq-head" style="margin-top:8px;max-height:120px">-</pre>
+      <div class="row" style="margin-top:10px">
+        <span class="sub">当前模式 <b id="mode-name">-</b></span>
+        <button class="primary" onclick="setMode('reply')">应答模式</button>
+        <button class="ghost" onclick="setMode('observe')">仅观察（不回包）</button>
+      </div>
+      <h2 style="margin-top:14px">payload 编辑（保存即热加载，不用重启）</h2>
+      <textarea id="payload-edit" spellcheck="false"></textarea>
+      <div class="row" style="margin-top:8px">
+        <button class="primary" onclick="applyPayload()">保存 payload</button>
+        <button class="ghost" onclick="resetPayload()">恢复默认</button>
+        <span class="sub" id="payload-state"></span>
+      </div>
+    </div>
+  </section>
+
+  <section class="panel" style="margin-top:14px">
+    <h2>最近流量（只看起来的请求，不包含被 ignore-hosts 放行的三台域名）</h2>
+    <table>
+      <colgroup><col style="width:74px"><col style="width:52px"><col><col style="width:90px"><col style="width:150px"></colgroup>
+      <thead><tr><th>时间</th><th>方法</th><th>URL</th><th>类型</th><th>客户端</th></tr></thead>
+      <tbody id="flows-body"><tr><td colspan="5" class="empty">暂无记录</td></tr></tbody>
+    </table>
+    <div class="hint">
+      ignore-hosts：<code id="ignore-hosts">-</code><br>
+      车机侧把 <code>mothership.vn.teslamotors.com</code> 解析到本机（或设 HTTP 代理到本机）后，反向/代理任一实例在跑就会被拦到。
+    </div>
+  </section>
+</main>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+let payloadDirty = false;
+
+function toast(msg, kind){
+  const el = document.createElement('div');
+  el.className = kind || '';
+  el.textContent = msg;
+  $('toast').appendChild(el);
+  setTimeout(() => el.remove(), 4200);
+}
+
+async function act(url, method='POST', refresh=false){
+  try{
+    const r = await fetch(url, {method, headers:{'Content-Type':'application/json'}});
+    const j = await r.json().catch(()=>({ok:r.ok}));
+    if(!j.ok && j.error) toast(j.error, 'err');
+    else if(j.ok) toast(typeof j === 'object' ? (j.note || '完成') : '完成', 'ok');
+    if(refresh) setTimeout(tick, 400);
+    setTimeout(tick, 600);
+    return j;
+  }catch(e){ toast('请求失败: ' + e, 'err'); return {ok:false}; }
+}
+
+async function toggle(mode){
+  const s = STATE?.mitm?.[mode];
+  const running = s?.running;
+  await act(`/api/proxy/${mode}/${running ? 'stop' : 'start'}`);
+}
+
+function fmtAgo(sec){
+  if(sec == null) return '-';
+  if(sec < 60) return sec + ' 秒前';
+  if(sec < 3600) return Math.floor(sec/60) + ' 分钟前';
+  return Math.floor(sec/3600) + ' 小时前';
+}
+
+let STATE = null;
+
+function render(s){
+  STATE = s;
+  $('clock').textContent = (s.now || '').slice(11, 19);
+
+  const rev = s.mitm.reverse, pxy = s.mitm.proxy;
+  $('p-rev').className = 'dot ' + (rev.running ? 'on' : 'off');
+  $('p-pxy').className = 'dot ' + (pxy.running ? 'on' : 'off');
+  $('btn-rev').textContent = rev.running ? '停止 reverse' : '启动 reverse';
+  $('btn-rev').className = rev.running ? 'danger' : 'primary';
+  $('btn-pxy').textContent = pxy.running ? '停止 proxy' : '启动 proxy';
+  $('btn-pxy').className = pxy.running ? 'danger' : 'primary';
+  $('upstream').textContent = rev.running
+      ? `4567 → 上游 ${rev.upstream || '?'}${rev.pid ? ' · pid ' + rev.pid : ''}`
+      : '两个实例都没跑';
+
+  const hs = s.hotspot || {};
+  const hsOn = String(hs.state).toLowerCase() === 'on';
+  $('p-hs').className = 'dot ' + (hsOn ? 'on' : (hs.error ? 'warn' : 'off'));
+  $('hs-state').textContent = hs.state || 'unknown';
+  $('hs-state').style.color = hsOn ? 'var(--green)' : 'var(--muted)';
+  $('hs-ssid').textContent = hs.ssid ? 'SSID ' + hs.ssid : (hs.error || '无热点信息');
+  const clients = hs.clients || [];
+  $('hs-clients').textContent = clients.length
+      ? '客户端：' + clients.map(c => (c.name || c.mac || '?') + (c.ip ? ` (${c.ip})` : '')).join('、')
+      : '客户端：0';
+
+  const car = s.car;
+  $('p-car').className = 'dot ' + (car ? (car.online ? 'on' : 'warn') : 'off');
+  $('car-ip').textContent = car ? car.ip : '未发现';
+  $('car-ip').style.color = car ? 'var(--text)' : 'var(--muted)';
+  $('car-meta').textContent = car
+      ? `${car.online ? '在线 (ping 通)' : '日志里出现过，当前 ping 不通'} · 来源 ${car.source}`
+      : '等车机把流量发过来';
+  $('car-mac').textContent = (car && car.mac) || '-';
+  $('car-count').textContent = car ? `${car.hits || 0} / ${car.flows || 0}` : '0 / 0';
+  $('car-last').textContent = car && car.last_seen_ago != null ? fmtAgo(car.last_seen_ago) : (car && car.last_seen) || '-';
+
+  const st = s.stats || {};
+  $('kpi-hits').textContent = st.hits || 0;
+  $('kpi-hits').style.color = (st.hits || 0) > 0 ? 'var(--green)' : 'var(--text)';
+  $('kpi-hits-sub').textContent = st.last_hit ? ('最近命中 ' + st.last_hit.slice(11, 19)) : '最近命中 --';
+  $('kpi-flow').textContent = st.flows || 0;
+
+  const hits = s.hits || [];
+  $('hits-body').innerHTML = hits.length ? hits.map(h => `
+    <tr>
+      <td>${esc((h.ts || '').slice(11, 19))}</td>
+      <td><span class="tag hit">${esc(h.method || '')}</span></td>
+      <td title="${esc(h.url)}">${esc(h.url)}</td>
+      <td>${esc(h.bytes ?? '')}</td>
+      <td title="${esc(h.user_agent || '')}">${esc(h.client || '')}</td>
+    </tr>`).join('')
+    : '<tr><td colspan="5" class="empty">还没有命中。车机重启后 5–10 分钟内应出现第一次。</td></tr>';
+
+  $('hits-hint').innerHTML = (st.by_host && Object.keys(st.by_host).length)
+      ? '按 Host 统计：' + Object.entries(st.by_host).map(([k, v]) => `<code>${esc(k)}</code>×${v}`).join(' · ')
+      : '';
+
+  const flows = s.flows || [];
+  $('flows-body').innerHTML = flows.length ? flows.map(f => `
+    <tr>
+      <td>${esc((f.ts || '').slice(11, 19))}</td>
+      <td>${esc(f.method || '')}</td>
+      <td title="${esc(f.url)}">${esc(f.url)}</td>
+      <td><span class="tag ${f.kind === 'NEAR_MISS' ? 'near' : 'flow'}">${esc(f.kind || 'FLOW')}</span></td>
+      <td>${esc(f.client || '')}</td>
+    </tr>`).join('')
+    : '<tr><td colspan="5" class="empty">暂无记录（FLOW 需要以 FSD_MOCK_LOG_ALL=1 启动，网页启动时默认开启）</td></tr>';
+
+  const m = s.mode || 'reply';
+  $('mode-name').textContent = m === 'observe' ? 'observe（只记录）' : 'reply（记录后回包）';
+  $('mode-name').style.color = m === 'observe' ? 'var(--amber)' : 'var(--green)';
+  const lq = s.last_request;
+  if (lq) {
+    $('lq-method').textContent = lq.method || '-';
+    $('lq-vin').textContent = lq.vin ? 'VIN ' + lq.vin : (lq.client || '');
+    $('lq-bytes').textContent = (lq.req_bytes ?? 0) + ' 字节';
+    $('lq-md5').textContent = lq.req_md5 ? 'md5 ' + lq.req_md5 : '';
+    $('lq-file').textContent = lq.req_file || '（无 body）';
+    $('lq-head').textContent = lq.req_head || '（无 body）';
+  } else {
+    $('lq-method').textContent = '-'; $('lq-vin').textContent = '';
+    $('lq-bytes').textContent = '-'; $('lq-md5').textContent = '';
+    $('lq-file').textContent = '还没收到过 /feature_configuration';
+    $('lq-head').textContent = '-';
+  }
+  const r = s.response;
+  $('resp-bytes').textContent = r.bytes + ' 字节';
+  $('resp-src').textContent = '来自 ' + r.source;
+  $('resp-md5').innerHTML = `<code>${esc(r.md5)}</code>`;
+  try{
+    $('resp-body').textContent = JSON.stringify(JSON.parse(r.body), null, 2);
+  }catch(_){ $('resp-body').textContent = r.body; }
+
+  if (!payloadDirty){
+    $('payload-edit').value = JSON.stringify(s.payload, null, 2);
+  }
+  $('payload-state').textContent = payloadDirty ? '有未保存修改' : '';
+  $('ignore-hosts').textContent = s.ignore_hosts || '-';
+
+  const primary = (s.local_ips || [])[0];
+  if (primary) document.title = `FSD 看板 · ${st.hits || 0} 命中 · ${primary}`;
+}
+
+async function tick(){
+  try{
+    const res = await fetch('/api/state', {cache:'no-store'});
+    const s = await res.json();
+    if (!s.error) render(s);
+  }catch(e){ /* 网络抖动忽略 */ }
+}
+
+async function applyPayload(){
+  let payload;
+  try{ payload = JSON.parse($('payload-edit').value); }
+  catch(e){ toast('JSON 语法错误: ' + e.message, 'err'); return; }
+  try{
+    const res = await fetch('/api/payload', {
+      method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({payload})
+    });
+    const j = await res.json();
+    if (j.ok){ payloadDirty = false; toast(`已保存 ${j.bytes}B / md5 ${j.md5.slice(0,8)}…`, 'ok'); tick(); }
+    else toast(j.error || '保存失败', 'err');
+  }catch(e){ toast('请求失败: ' + e, 'err'); }
+}
+
+async function setMode(mode){
+  try{
+    const r = await fetch('/api/mode', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({mode})});
+    const j = await r.json();
+    if (j.ok) toast(mode === 'observe' ? '已切到仅观察：只记录、不回包' : '已切回应答模式', 'ok');
+    else toast(j.error || '切换失败', 'err');
+    tick();
+  }catch(e){ toast('失败: ' + e, 'err'); }
+}
+async function resetPayload(){
+  await fetch('/api/payload/reset', {method:'POST'});
+  payloadDirty = false;
+  toast('已恢复默认 payload', 'ok');
+  tick();
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  $('payload-edit').addEventListener('input', () => { payloadDirty = true; $('payload-state').textContent = '有未保存修改'; });
+  tick();
+  setInterval(tick, 1500);
+});
+</script>
+</body>
+</html>
